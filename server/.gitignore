@@ -3,3 +3,4 @@ npm-debug.log*
 data/*.json
 data/*.csv
 .env
+coverage/

@@ -33,7 +33,7 @@ Ver [`../docs/API.md`](../docs/API.md).
 Resumo:
 
 | Método | Rota | Descrição |
-|--------|------|-----------|
+| ------ | ---- | --------- |
 | GET | `/api/health` | Health check |
 | GET | `/api/status` | Estado atual + histórico |
 | POST | `/api/status` | Enviado pelo ESP32 |
@@ -74,7 +74,7 @@ O arquivo é montado como volume (Docker) ou escrito direto no filesystem (dev).
 ## Variáveis de ambiente
 
 | Variável | Padrão | Descrição |
-|----------|--------|-----------|
+| -------- | ------ | --------- |
 | `PORT` | `3000` | Porta HTTP |
 | `NODE_ENV` | `production` | Ambiente |
 
@@ -129,3 +129,35 @@ Ao usar `docker logs`, use o **nome do container** (`rack-monitor-server`).
 ## Troubleshooting
 
 Ver [`../docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md)
+
+## Testes
+
+Suite de testes automatizados com **Jest** + **Supertest**.
+
+### Executar testes
+
+    cd server
+    npm install              # primeira vez
+    npm test                 # roda uma vez
+    npm run test:watch       # watch mode (re-roda ao salvar)
+    npm run test:coverage    # gera relatorio de cobertura
+
+### Cobertura atual
+
+15 testes cobrindo todos os endpoints:
+
+- GET /api/health
+- POST /api/status
+- GET /api/status
+- POST /api/comando
+- GET /api/comando
+- GET /api/stats
+- Fluxo end-to-end ESP32 -> Navegador -> ESP32
+
+### Estrutura dos testes
+
+    server/
+    ├── app.js              # configuracao Express (exportada para testes)
+    ├── server.js           # entry point (app.listen)
+    ├── server.test.js      # suite de testes
+    └── package.json        # scripts e dependencias
