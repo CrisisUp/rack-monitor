@@ -1,63 +1,105 @@
-# Firmware - ESP32
+# 🔌 Firmware
 
-Código do sistema de monitoramento do rack.
+Código do ESP32 para o Rack Monitor. Versão **v7.5**.
 
 ## Arquivos
 
-- `sketch.ino` - Código principal do ESP32
-- `diagram.json` - Circuito para o Wokwi
-- `libraries.txt` - Bibliotecas necessárias
+| Arquivo | Descrição |
+|---------|-----------|
+| `sketch.ino` | Código principal |
+| `diagram.json` | Circuito no Wokwi |
+| `libraries.txt` | Bibliotecas necessárias |
 
-## Como usar
+## Rodar no Wokwi
 
-### No Wokwi (online)
+1. Abra [wokwi.com/projects/new/esp32](https://wokwi.com/projects/new/esp32)
+2. Cole `sketch.ino` no editor de código
+3. Cole `diagram.json` na aba **diagram.json**
+4. Adicione as bibliotecas de `libraries.txt` no Library Manager
+5. Ajuste `SERVIDOR_URL_PADRAO` (ou use `SET URL` em runtime)
+6. Clique em ▶ **Play**
 
-1. Acesse <https://wokwi.com/projects/new/esp32>
-2. Cole o conteúdo de `sketch.ino` no editor
-3. Cole o conteúdo de `diagram.json` na aba `diagram.json`
-4. Cole o conteúdo de `libraries.txt` na aba `Library Manager`
-5. Clique em Play
+## Bibliotecas
 
-### No VS Code + Extensão Wokwi
+Veja `libraries.txt`:
 
-1. Abra esta pasta no VS Code
-2. Instale a extensão **Wokwi Simulator**
-3. Abra `sketch.ino`
-4. Pressione `F1` → `Wokwi: Start Simulator`
+- Adafruit GFX Library
+- Adafruit SSD1306
+- RTClib
+- MFRC522
 
-## Comandos do Serial Monitor
+`WiFi`, `WiFiClientSecure`, `HTTPClient`, `Preferences`, `Wire` e `SPI` já vêm no core do ESP32.
+
+## Hardware
+
+### Pinos
+
+| Pino | Componente |
+|------|------------|
+| 5 | RFID SS |
+| 4 | RFID RST |
+| 18 / 19 / 23 | SPI (SCK / MISO / MOSI) |
+| 27 | PIR |
+| 17 | TRIG (ultrassônico) |
+| 16 | ECHO (ultrassônico) |
+| 34 | LDR |
+| 14 | Botão (INPUT_PULLUP) |
+| 25 | Switch da porta |
+| 15 | Buzzer de eventos |
+| 2 | Buzzer de emergência |
+| 32 / 33 / 0 | LED RGB (R / G / B) |
+| 21 / 22 | I2C (SDA / SCL) |
+
+### Componentes
+
+- ESP32 DevKit
+- MFRC522 (RFID)
+- Sensor PIR
+- HC-SR04 (ultrassônico)
+- LDR + resistor
+- Botão push
+- Switch fim de curso
+- 2 buzzers passivos
+- LED RGB (cátodo comum)
+- OLED SSD1306 128×64 (I2C)
+- RTC DS3231 (I2C, opcional — só em hardware real)
+
+## Comandos do Serial
+
+Digite `HELP` para listar. Os principais:
 
 | Comando | Descrição |
-| --- | --- |
-| `HELP` | Lista todos os comandos |
-| `STATUS` | Status completo do sistema |
-| `ARMAR` | Força modo ARMADO (se porta fechada) |
-| `DESARMAR` | Força modo DESARMADO |
-| `TESTE` | Modo teste (LEDs/buzzers/sensores) |
-| `TESTE_HTTPS` | Testa HTTPS para 3 sites |
-| `TESTE_SRV` | Testa conexão com servidor remoto |
-| `DIAG` | Diagnóstico de rede detalhado |
-| `SET LIMIAR <5-400>` | Ajusta limiar ultrassônico |
-| `SET TIMEOUT <0-1440>` | Timeout de desarme (min) |
-| `RTC` | Mostra hora do RTC |
+|---------|-----------|
+| `STATUS` | Status completo |
+| `SET URL <https://...>` | Troca a URL do servidor |
+| `GET URL` | Mostra a URL ativa |
+| `TESTE_SRV` | Testa conexão |
+| `RECONECTAR` | Força nova conexão TLS |
+| `DIAG` | Diagnóstico de rede |
+| `ARMAR` / `DESARMAR` | Controle do modo vigilante |
 | `RESET` | Zera contadores |
 
-## Versões
+Lista completa em [`../docs/FIRMWARE.md`](../docs/FIRMWARE.md).
 
-- v5.0 - Modo Vigilante + Rearme condicionado
-- v6.0 - Web Server local
-- v7.0 - Cliente HTTP + ngrok
-- v7.2 - Cloudflare Tunnel + HTTPS
+## Cartões autorizados
 
-## Hardware necessário
+Edite no `sketch.ino` as constantes:
 
-- ESP32 DevKit C v4
-- MFRC522 (leitor RFID)
-- HC-SR04 (ultrassônico)
-- PIR (sensor de movimento)
-- LDR (fotoresistor)
-- SSD1306 (display OLED)
-- DS3231 (RTC)
-- Botão + Switch
-- 2 Buzzers
-- LED RGB
+- `CARTAO_AUTORIZADO_1` = `"01020304"` (Admin)
+- `CARTAO_AUTORIZADO_2` = `"55667788"` (Operador)
+
+## Persistência da URL (v7.5+)
+
+A URL do servidor é salva em NVS e sobrevive a reboots. Trocar sem recompilar:
+
+Digite no Serial Monitor:
+
+    SET URL https://nova-url.trycloudflare.com
+
+Voltar ao padrão:
+
+    URL RESET
+
+## Troubleshooting
+
+Problemas comuns: [`../docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md)
