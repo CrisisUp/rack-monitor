@@ -1,0 +1,452 @@
+/* ═══════════════════════════════════════════════════════════════
+   RACK MONITOR — Design tokens e estilos
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─────────── Variáveis (design tokens) ─────────── */
+:root {
+  /* Cores base */
+  --c-bg: #0f172a;
+  --c-bg-elev: #1e293b;
+  --c-bg-elev-hover: #263449;
+  --c-border: #334155;
+  --c-border-hover: #60a5fa;
+
+  /* Texto */
+  --c-text: #e2e8f0;
+  --c-text-strong: #f1f5f9;
+  --c-text-muted: #94a3b8;
+  --c-text-faint: #64748b;
+
+  /* Semânticas */
+  --c-ok: #4ade80; /* verde  */
+  --c-warn: #fbbf24; /* amarelo */
+  --c-alert: #fb923c; /* laranja */
+  --c-crit: #f87171; /* vermelho */
+  --c-info: #60a5fa; /* azul   */
+
+  /* Ações */
+  --c-primary: #2563eb;
+  --c-primary-hover: #1d4ed8;
+  --c-danger: #dc2626;
+  --c-danger-hover: #b91c1c;
+  --c-neutral: #475569;
+  --c-neutral-hover: #334155;
+
+  /* Espaçamento (escala 4px) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Tipografia */
+  --ff-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --ff-mono: ui-monospace, "SF Mono", Consolas, Monaco, monospace;
+
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.85rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.3rem;
+  --fs-xl: 1.6rem;
+  --fs-2xl: 1.8rem;
+
+  /* Layout */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --transition: 0.15s ease;
+}
+
+/* ─────────── Reset enxuto ─────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--ff-sans);
+  font-size: var(--fs-base);
+  background: var(--c-bg);
+  color: var(--c-text);
+  min-height: 100vh;
+  padding: var(--sp-5);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* ─────────── Container ─────────── */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+/* ─────────── Header ─────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.header__title {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--c-info);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.header__badge {
+  font-size: var(--fs-xs);
+  background: #1e40af;
+  color: #fff;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.header__connection {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+}
+
+/* ─────────── Indicador de conexão ─────────── */
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot--online {
+  background: var(--c-ok);
+  animation: pulse 2s infinite;
+}
+.dot--offline {
+  background: var(--c-crit);
+}
+.dot--stale {
+  background: var(--c-warn);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ─────────── Grid de cards ─────────── */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
+}
+
+.card {
+  background: var(--c-bg-elev);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  transition:
+    border-color var(--transition),
+    transform var(--transition);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0; /* permite shrink em grid */
+}
+
+.card:hover {
+  border-color: var(--c-border-hover);
+}
+
+.card__label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card__value {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--c-text-strong);
+  line-height: 1.25;
+  overflow-wrap: anywhere; /* ← nunca trunca */
+}
+
+.card__value--sm {
+  font-size: var(--fs-base);
+}
+.card__value--mono {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-base);
+}
+
+/* Tons semânticos — cor no texto do valor */
+.card[data-tone="modo"] .card__value {
+  color: var(--c-info);
+}
+.card[data-tone="porta"] .card__value[data-state="ABERTA"] {
+  color: var(--c-crit);
+}
+.card[data-tone="porta"] .card__value[data-state="fechada"] {
+  color: var(--c-ok);
+}
+.card[data-tone="modo"] .card__value[data-state="DESARMADO"] {
+  color: var(--c-info);
+}
+.card[data-tone="modo"] .card__value[data-state="ARMADO"] {
+  color: var(--c-ok);
+}
+
+/* Estado do alarme — 6 valores possíveis, cada um com sua cor */
+.card[data-tone="estado"] .card__value[data-state="SEGURO"] {
+  color: var(--c-ok);
+}
+.card[data-tone="estado"] .card__value[data-state="ACESSO_RFID"] {
+  color: var(--c-ok);
+}
+.card[data-tone="estado"] .card__value[data-state="AVISO_SALA"] {
+  color: var(--c-warn);
+}
+.card[data-tone="estado"] .card__value[data-state="APROXIMACAO_RACK"] {
+  color: var(--c-alert);
+}
+.card[data-tone="estado"] .card__value[data-state="INVASAO_SALA"] {
+  color: var(--c-crit);
+}
+.card[data-tone="estado"] .card__value[data-state="EMERGENCIA_RACK"] {
+  color: var(--c-crit);
+}
+
+/* Destaque temporário quando o valor muda */
+.card__value.flash {
+  animation: flash 0.8s ease;
+}
+
+@keyframes flash {
+  0% {
+    background: rgba(96, 165, 250, 0.25);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ─────────── Botões ─────────── */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-6);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    transform var(--transition),
+    opacity var(--transition);
+}
+
+.btn:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--c-primary);
+}
+.btn--danger {
+  background: var(--c-danger);
+}
+.btn--neutral {
+  background: var(--c-neutral);
+}
+
+.btn--loading::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ─────────── Painéis (logs) ─────────── */
+.panel {
+  margin-bottom: var(--sp-6);
+}
+
+.panel__title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--c-text-muted);
+  margin-bottom: var(--sp-3);
+  letter-spacing: 0.3px;
+}
+
+.log {
+  background: #020617;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+
+.log--history {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-xs);
+}
+
+.log__empty {
+  color: var(--c-text-faint);
+  font-style: italic;
+}
+
+.log__line {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: var(--sp-3);
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+  align-items: baseline;
+}
+
+.log__line:last-child {
+  border-bottom: none;
+}
+
+.log--history .log__line {
+  grid-template-columns: auto auto 1fr auto;
+}
+
+.log__time {
+  color: var(--c-text-faint);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.log__icon {
+  user-select: none;
+}
+
+.log__msg {
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+
+.log__msg strong {
+  color: var(--c-text-strong);
+  font-weight: 600;
+}
+
+/* ─────────── Footer ─────────── */
+.footer {
+  text-align: center;
+  color: var(--c-text-faint);
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-8);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+}
+
+/* ─────────── Mobile ─────────── */
+@media (max-width: 600px) {
+  body {
+    padding: var(--sp-3);
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .header__title {
+    font-size: var(--fs-xl);
+  }
+
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--sp-3);
+  }
+
+  .controls {
+    gap: var(--sp-2);
+  }
+  .btn {
+    flex: 1;
+    justify-content: center;
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+
+  .log__line {
+    grid-template-columns: auto 1fr;
+  }
+  .log__icon {
+    display: none;
+  }
+}

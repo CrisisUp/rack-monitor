@@ -24,6 +24,7 @@ O Rack Monitor combina hardware (ESP32 + sensores) com software (Node.js + Docke
 ---
 
 ## 🏗️ Arquitetura
+
 ┌──────────────────────┐
 │ ESP32 (Wokwi/real) │
 │ - RFID │
@@ -106,8 +107,10 @@ Local: http://localhost:3000
 
 Público: a URL do Cloudflare
 
-📚 Documentação
+## 📚 Documentação
+
 Documento	Descrição
+
 ARQUITETURA.md	Decisões técnicas e diagramas
 INSTALACAO.md	Passo a passo detalhado
 API.md	Endpoints do servidor
@@ -150,6 +153,7 @@ Docker — containerização
 Cloudflare Tunnel — túnel público
 
 🤝 Contribuindo
+
 Fork o projeto
 
 Crie uma branch (git checkout -b feature/nova-funcionalidade)

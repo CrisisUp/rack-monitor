@@ -5,7 +5,9 @@
 #include <Adafruit_SSD1306.h>
 #include <RTClib.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <Preferences.h>
 
 // ==========================================
 // CONFIGURAÇÃO DE REDE E SERVIDOR
@@ -13,12 +15,30 @@
 const char* WIFI_SSID     = "Wokwi-GUEST";
 const char* WIFI_PASSWORD = "";
 
-// URL do Cloudflare Tunnel (muda a cada reinicio do cloudflared)
-const char* SERVIDOR_URL = "https://potentially-sin-hop-syntax.trycloudflare.com";
+// URL PADRÃO — usada apenas no primeiro boot ou após "URL RESET".
+// Depois disso, a URL fica persistida na NVS e pode ser trocada via "SET URL".
+const char* SERVIDOR_URL_PADRAO = "https://continental-specials-perry-velvet.trycloudflare.com";
+
+// URL ativa (carregada da NVS no setup, ou da constante acima se NVS vazia)
+String servidorUrl = "";
+
+// Namespace e chave da NVS
+constexpr const char* NVS_NAMESPACE = "rack";
+constexpr const char* NVS_KEY_URL   = "srv_url";
 
 // Intervalos de comunicação
 constexpr unsigned long INTERVALO_ENVIO_STATUS_MS = 20000;   // 20s
 constexpr unsigned long INTERVALO_BUSCA_CMD_MS    = 15000;   // 15s
+
+// Timeouts HTTP/TLS (ms)
+constexpr uint32_t HTTP_CONNECT_TIMEOUT_MS = 10000;
+constexpr uint32_t HTTP_READ_TIMEOUT_MS    = 15000;
+
+// Retry / reconexão
+constexpr int      HTTP_MAX_TENTATIVAS     = 3;
+constexpr uint32_t HTTP_RETRY_BACKOFF_MS   = 500;
+constexpr uint32_t HTTP_KEEPALIVE_RETRY_MS = 60000;
+constexpr int      HTTP_FALHAS_CRITICAS    = 5;
 
 // Fallback AP
 constexpr bool HABILITAR_FALLBACK_AP = true;
@@ -90,6 +110,7 @@ const String CARTAO_AUTORIZADO_2 = "55667788";
 Adafruit_SSD1306 display(LARGURA_TELA, ALTURA_TELA, &Wire, -1);
 RTC_DS3231 rtc;
 MFRC522 rfid(Pins::RFID_SS, Pins::RFID_RST);
+Preferences prefs;
 
 // ==========================================
 // ENUMS
@@ -176,6 +197,12 @@ unsigned int  contadorEnviosOk      = 0;
 unsigned int  contadorEnviosFalha   = 0;
 unsigned int  contadorCmdsRecebidos = 0;
 
+// Cliente HTTPS persistente (keep-alive)
+WiFiClientSecure clienteSeguro;
+bool             clienteSeguroPronto = false;
+unsigned long    tempoUltimaFalhaCritica = 0;
+int              falhasConsecutivasStatus = 0;
+
 // ==========================================
 // ESTADO GLOBAL — OPERACIONAL
 // ==========================================
@@ -225,12 +252,16 @@ void  processarBotao();
 void  executarModoTeste();
 bool  tentarArmar();
 
-// Rede
-void iniciarWiFi();
-void enviarStatusParaServidor();
-void buscarComandosDoServidor();
-void executarDiagnostico();
-void testarHTTPS();
+// Rede / NVS
+void  carregarUrlDaNVS();
+void  salvarUrlNaNVS(const String &url);
+void  resetarUrlNVS();
+void  iniciarWiFi();
+void  prepararClienteSeguro();
+void  enviarStatusParaServidor();
+void  buscarComandosDoServidor();
+void  executarDiagnostico();
+void  testarHTTPS();
 
 // ==========================================
 // SETUP
@@ -276,10 +307,14 @@ void setup() {
     }
   }
 
+  // ─── Carrega URL persistida (ou usa padrão) ───
+  carregarUrlDaNVS();
+
   Serial.println();
   Serial.println(F("================================================="));
-  Serial.println(F("  SISTEMA DE MONITORAMENTO DE RACK - v7.2"));
+  Serial.println(F("  SISTEMA DE MONITORAMENTO DE RACK - v7.5"));
   Serial.println(F("  Vigilante + RFID + Filtros + RTC + Cloudflare"));
+  Serial.println(F("  URL persistida em NVS + SET URL em runtime"));
   Serial.println(F("================================================="));
   logSerial("INFO", "SISTEMA", "Sistema inicializado. MODO VIGILANTE: ARMADO.");
   logSerial("INFO", "RFID", "Cartao 1 Autorizado: " + CARTAO_AUTORIZADO_1);
@@ -294,11 +329,12 @@ void setup() {
     "Botao: deb " + String(DEBOUNCE_BOTAO_MS) + "ms | duplo <" +
     String(JANELA_CLIQUE_DUPLO_MS) + "ms | longo >" + String(DURACAO_CLIQUE_LONGO_MS) + "ms");
   logSerial("INFO", "FILTROS", "Porta: deb " + String(DEBOUNCE_PORTA_MS) + "ms");
-  logSerial("INFO", "SRV", "Servidor remoto: " + String(SERVIDOR_URL));
+  logSerial("INFO", "SRV", "Servidor remoto: " + servidorUrl);
   logSerial("INFO", "SISTEMA", "Digite HELP no Serial para comandos disponiveis.");
   Serial.println(F("-------------------------------------------------"));
 
   iniciarWiFi();
+  prepararClienteSeguro();
 
   exibirTelaStatus();
 }
@@ -307,11 +343,9 @@ void setup() {
 // LOOP PRINCIPAL
 // ==========================================
 void loop() {
-  // 1. Comunicação com servidor
   enviarStatusParaServidor();
   buscarComandosDoServidor();
 
-  // 2. Comandos Serial
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
@@ -324,19 +358,14 @@ void loop() {
     }
   }
 
-  // 3. Sensores
   bool  portaAberta        = lerPortaFiltrada();
   bool  movimentoDetectado = (digitalRead(Pins::PIR) == HIGH);
   bool  luzAcesa           = lerLDRFiltrado();
   float distancia          = lerDistanciaFiltrada();
 
-  // 4. RFID
   bool rfidDetectado = verificarRFID();
-
-  // 5. Botão
   processarBotao();
 
-  // 6. Detecção de borda para logs
   if (movimentoDetectado != estadoAnteriorPIR) {
     if (modoVigilante == DESARMADO && movimentoDetectado) {
       contadorMovimentosManutencao++;
@@ -367,7 +396,6 @@ void loop() {
     portaEstadoAnterior = portaAberta;
   }
 
-  // 7. Timeout do desarme
   if (modoVigilante == DESARMADO) {
     unsigned long decorrido = millis() - tempoInicioDesarme;
     unsigned long restante  = (timeoutDesarme > decorrido) ? (timeoutDesarme - decorrido) : 0;
@@ -383,13 +411,11 @@ void loop() {
     }
   }
 
-  // 8. Aviso de bloqueio expira
   if (motivoBloqueio.length() > 0 &&
       (millis() - tempoBloqueioAtivo) > DURACAO_AVISO_BLOQUEIO_MS) {
     motivoBloqueio = "";
   }
 
-  // 9. Máquina de estados
   if (modoVigilante == ARMADO) {
     EstadoSistema candidato;
     if (rfidDetectado || (millis() - tempoUltimoRFID < 2500)) {
@@ -465,6 +491,51 @@ void loop() {
 }
 
 // ==========================================
+// NVS — persistência da URL
+// ==========================================
+void carregarUrlDaNVS() {
+  prefs.begin(NVS_NAMESPACE, true);   // read-only
+  String urlSalva = prefs.getString(NVS_KEY_URL, "");
+  prefs.end();
+
+  if (urlSalva.length() > 0 && urlSalva.startsWith("http")) {
+    servidorUrl = urlSalva;
+    Serial.print(F("[NVS] URL carregada: "));
+    Serial.println(servidorUrl);
+  } else {
+    servidorUrl = String(SERVIDOR_URL_PADRAO);
+    Serial.print(F("[NVS] Nenhuma URL salva. Usando padrao: "));
+    Serial.println(servidorUrl);
+
+    // Persiste o padrão para o próximo boot
+    prefs.begin(NVS_NAMESPACE, false);
+    prefs.putString(NVS_KEY_URL, servidorUrl);
+    prefs.end();
+  }
+}
+
+void salvarUrlNaNVS(const String &url) {
+  prefs.begin(NVS_NAMESPACE, false);   // read-write
+  size_t gravado = prefs.putString(NVS_KEY_URL, url);
+  prefs.end();
+
+  if (gravado > 0) {
+    logSerial("INFO", "NVS", "URL salva na flash (" + String(gravado) + " bytes).");
+  } else {
+    logSerial("WARN", "NVS", "Falha ao gravar URL na flash.");
+  }
+}
+
+void resetarUrlNVS() {
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.remove(NVS_KEY_URL);
+  prefs.end();
+
+  servidorUrl = String(SERVIDOR_URL_PADRAO);
+  logSerial("INFO", "NVS", "URL resetada. Usando padrao: " + servidorUrl);
+}
+
+// ==========================================
 // REDE — WiFi
 // ==========================================
 void iniciarWiFi() {
@@ -504,12 +575,24 @@ void iniciarWiFi() {
 }
 
 // ==========================================
+// CLIENTE TLS PERSISTENTE
+// ==========================================
+void prepararClienteSeguro() {
+  clienteSeguro.stop();
+  clienteSeguro.setInsecure();
+  clienteSeguro.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);
+  clienteSeguroPronto = true;
+}
+
+// ==========================================
 // SERVIDOR REMOTO — envio de status
 // ==========================================
 void enviarStatusParaServidor() {
   if (!wifiConectado || modoAP) return;
   if (millis() - tempoUltimoEnvioStatus < INTERVALO_ENVIO_STATUS_MS) return;
   tempoUltimoEnvioStatus = millis();
+
+  if (!clienteSeguroPronto) prepararClienteSeguro();
 
   String json = "{";
   json += "\"timestamp\":\"" + obterTimestamp() + "\",";
@@ -523,13 +606,34 @@ void enviarStatusParaServidor() {
   json += "\"uid\":\"" + (ultimoUIDLido.length() ? ultimoUIDLido : "-") + "\"";
   json += "}";
 
-  HTTPClient http;
-  http.begin(String(SERVIDOR_URL) + "/api/status");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.2");
-  http.setTimeout(10000);
+  int code = -999;
 
-  int code = http.POST(json);
+  for (int tent = 1; tent <= HTTP_MAX_TENTATIVAS; tent++) {
+    HTTPClient http;
+    http.setReuse(true);
+    http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+    http.setTimeout(HTTP_READ_TIMEOUT_MS);
+
+    if (!http.begin(clienteSeguro, servidorUrl + "/api/status")) {
+      logSerial("WARN", "SRV", "http.begin falhou (tent " + String(tent) + ")");
+      prepararClienteSeguro();
+      delay(HTTP_RETRY_BACKOFF_MS * tent);
+      continue;
+    }
+
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.5");
+    http.addHeader("Connection", "keep-alive");
+
+    code = http.POST(json);
+    http.end();
+
+    if (code == 200) break;
+
+    prepararClienteSeguro();
+    delay(HTTP_RETRY_BACKOFF_MS * tent);
+  }
+
   ultimoCodigoHTTP = code;
 
   if (code == 200) {
@@ -538,15 +642,25 @@ void enviarStatusParaServidor() {
     }
     contadorEnviosOk++;
     servidorOnline = true;
+    falhasConsecutivasStatus = 0;
   } else {
     contadorEnviosFalha++;
+    falhasConsecutivasStatus++;
     servidorOnline = false;
-    if (contadorEnviosFalha % 10 == 1) {
-      logSerial("WARN", "SRV", "Falha ao enviar. HTTP " + String(code) +
-        " | " + http.errorToString(code));
+
+    if (contadorEnviosFalha <= 5 || contadorEnviosFalha % 10 == 1) {
+      logSerial("WARN", "SRV",
+        "Falha apos " + String(HTTP_MAX_TENTATIVAS) +
+        " tentativas. HTTP " + String(code));
+    }
+
+    if (falhasConsecutivasStatus >= HTTP_FALHAS_CRITICAS) {
+      logSerial("WARN", "SRV", "Muitas falhas seguidas. Pausando envios por 60s.");
+      tempoUltimaFalhaCritica = millis();
+      falhasConsecutivasStatus = 0;
+      prepararClienteSeguro();
     }
   }
-  http.end();
 }
 
 // ==========================================
@@ -555,12 +669,28 @@ void enviarStatusParaServidor() {
 void buscarComandosDoServidor() {
   if (!wifiConectado || modoAP) return;
   if (millis() - tempoUltimaBuscaCmd < INTERVALO_BUSCA_CMD_MS) return;
+
+  if (tempoUltimaFalhaCritica > 0 &&
+      (millis() - tempoUltimaFalhaCritica) < HTTP_KEEPALIVE_RETRY_MS) {
+    return;
+  }
+
   tempoUltimaBuscaCmd = millis();
+  if (!clienteSeguroPronto) prepararClienteSeguro();
 
   HTTPClient http;
-  http.begin(String(SERVIDOR_URL) + "/api/comando");
-  http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.2");
-  http.setTimeout(10000);
+  http.setReuse(true);
+  http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+  http.setTimeout(HTTP_READ_TIMEOUT_MS);
+
+  if (!http.begin(clienteSeguro, servidorUrl + "/api/comando")) {
+    logSerial("WARN", "SRV", "http.begin falhou (GET cmd)");
+    prepararClienteSeguro();
+    return;
+  }
+
+  http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.5");
+  http.addHeader("Connection", "keep-alive");
 
   int code = http.GET();
   if (code == 200) {
@@ -591,62 +721,58 @@ void executarDiagnostico() {
   Serial.println();
   Serial.println(F("===== DIAGNOSTICO DE REDE ====="));
 
-  Serial.print(F("WiFi Status: "));
-  Serial.println(WiFi.status());
-  Serial.print(F("Modo: "));
-  Serial.println(modoAP ? "AP" : "STA");
-  Serial.print(F("IP local: "));
-  Serial.println(modoAP ? WiFi.softAPIP() : WiFi.localIP());
-  Serial.print(F("Gateway: "));
-  Serial.println(WiFi.gatewayIP());
-  Serial.print(F("DNS: "));
-  Serial.println(WiFi.dnsIP());
-  Serial.print(F("RSSI: "));
-  Serial.print(WiFi.RSSI());
-  Serial.println(F(" dBm"));
+  Serial.print(F("WiFi Status: "));  Serial.println(WiFi.status());
+  Serial.print(F("Modo: "));          Serial.println(modoAP ? "AP" : "STA");
+  Serial.print(F("IP local: "));      Serial.println(modoAP ? WiFi.softAPIP() : WiFi.localIP());
+  Serial.print(F("Gateway: "));       Serial.println(WiFi.gatewayIP());
+  Serial.print(F("DNS: "));           Serial.println(WiFi.dnsIP());
+  Serial.print(F("RSSI: "));          Serial.print(WiFi.RSSI()); Serial.println(F(" dBm"));
+  Serial.print(F("Free heap: "));     Serial.println(ESP.getFreeHeap());
+  Serial.print(F("Servidor URL: "));  Serial.println(servidorUrl);
 
-  // Teste DNS
   IPAddress ip;
   Serial.print(F("Resolvendo DNS do Cloudflare... "));
-  String host = String(SERVIDOR_URL);
+  String host = servidorUrl;
   host.replace("https://", "");
   host.replace("http://", "");
   int slash = host.indexOf("/");
   if (slash > 0) host = host.substring(0, slash);
   if (WiFi.hostByName(host.c_str(), ip)) {
-    Serial.print(F("OK -> "));
-    Serial.println(ip);
+    Serial.print(F("OK -> ")); Serial.println(ip);
   } else {
     Serial.println(F("FALHOU!"));
   }
 
-  // Teste HTTP simples
   Serial.println(F("\nTeste HTTP (example.com)..."));
-  HTTPClient http;
-  http.begin("http://example.com");
-  http.setTimeout(5000);
-  int code = http.GET();
-  Serial.print(F("HTTP code: "));
-  Serial.println(code);
-  http.end();
-
-  // Teste HTTPS do servidor
-  Serial.println(F("\nTeste HTTPS servidor..."));
-  HTTPClient https;
-  https.begin(String(SERVIDOR_URL) + "/api/health");
-  https.addHeader("User-Agent", "ESP32-Rack-Monitor/7.2");
-  https.setTimeout(10000);
-  int code2 = https.GET();
-  Serial.print(F("HTTP code: "));
-  Serial.print(code2);
-  if (code2 == 200) {
-    Serial.print(F(" | Resposta: "));
-    Serial.println(https.getString());
-  } else {
-    Serial.print(F(" | Erro: "));
-    Serial.println(https.errorToString(code2));
+  {
+    HTTPClient http;
+    http.setConnectTimeout(5000);
+    http.setTimeout(5000);
+    http.begin("http://example.com");
+    int code = http.GET();
+    Serial.print(F("HTTP code: ")); Serial.println(code);
+    http.end();
   }
-  https.end();
+
+  Serial.println(F("\nTeste HTTPS servidor..."));
+  {
+    if (!clienteSeguroPronto) prepararClienteSeguro();
+    HTTPClient https;
+    https.setReuse(true);
+    https.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+    https.setTimeout(HTTP_READ_TIMEOUT_MS);
+    if (https.begin(clienteSeguro, servidorUrl + "/api/health")) {
+      https.addHeader("User-Agent", "ESP32-Rack-Monitor/7.5");
+      int code2 = https.GET();
+      Serial.print(F("HTTP code: ")); Serial.print(code2);
+      if (code2 == 200) {
+        Serial.print(F(" | Resposta: ")); Serial.println(https.getString());
+      } else {
+        Serial.print(F(" | Erro: ")); Serial.println(https.errorToString(code2));
+      }
+      https.end();
+    }
+  }
 
   Serial.println(F("================================"));
   Serial.println();
@@ -665,12 +791,19 @@ void testarHTTPS() {
   };
 
   for (int i = 0; i < 3; i++) {
+    WiFiClientSecure cliLocal;
+    cliLocal.setInsecure();
+
     HTTPClient http;
-    http.begin(sites[i]);
-    http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.2");
-    http.setTimeout(8000);
+    http.setConnectTimeout(8000);
+    http.setTimeout(10000);
+    http.begin(cliLocal, sites[i]);
+    http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.5");
+
     int code = http.GET();
-    logSerial("INFO", "HTTPS", String(sites[i]) + " -> " + String(code));
+    String resultado = String(sites[i]) + " -> " + String(code);
+    if (code < 0) resultado += " | " + http.errorToString(code);
+    logSerial("INFO", "HTTPS", resultado);
     http.end();
     delay(300);
   }
@@ -694,7 +827,6 @@ bool lerLDRFiltrado() {
       tempoUltimaMudancaLDR = millis();
     }
   }
-
   return estadoLuzFiltrado;
 }
 
@@ -710,7 +842,6 @@ bool lerPortaFiltrada() {
       bruto != estadoPortaFiltrado) {
     estadoPortaFiltrado = bruto;
   }
-
   return estadoPortaFiltrado;
 }
 
@@ -726,14 +857,10 @@ float lerDistanciaBruta() {
 }
 
 float lerDistanciaFiltrada() {
-  float soma    = 0.0f;
-  int   validas = 0;
+  float soma = 0.0f; int validas = 0;
   for (int i = 0; i < US_AMOSTRAS; i++) {
     float d = lerDistanciaBruta();
-    if (d > 0.0f && d < US_DIST_MAX_VALIDA) {
-      soma += d;
-      validas++;
-    }
+    if (d > 0.0f && d < US_DIST_MAX_VALIDA) { soma += d; validas++; }
     delayMicroseconds(60);
   }
   return (validas > 0) ? (soma / validas) : 999.0f;
@@ -791,9 +918,7 @@ bool tentarArmar() {
   tone(Pins::BUZZER_E, 800, 100);  delay(120);
   tone(Pins::BUZZER_E, 1000, 150);
 
-  estadoAtual     = SEGURO;
-  estadoAnterior  = SEGURO;
-  estadoCandidato = SEGURO;
+  estadoAtual = SEGURO; estadoAnterior = SEGURO; estadoCandidato = SEGURO;
   return true;
 }
 
@@ -815,9 +940,7 @@ void rearmarPorTimeout() {
     "REARME AUTOMATICO por timeout | Duracao: " + String(duracaoUltimoDesarme) + "s");
   tone(Pins::BUZZER_D, 1500, 200); delay(250);
   tone(Pins::BUZZER_D, 2000, 300);
-  estadoAtual     = SEGURO;
-  estadoAnterior  = SEGURO;
-  estadoCandidato = SEGURO;
+  estadoAtual = SEGURO; estadoAnterior = SEGURO; estadoCandidato = SEGURO;
 }
 
 // ==========================================
@@ -881,7 +1004,7 @@ void processarBotao() {
     if (duracao >= DURACAO_CLIQUE_LONGO_MS) {
       tempoUltimaAcaoBotao = millis();
       cliquesBotao = 0;
-      logSerial("INFO", "BOTAO", "Clique LONGO (" + String(duracao) + "ms): rearme forçado.");
+      logSerial("INFO", "BOTAO", "Clique LONGO (" + String(duracao) + "ms): rearme forcado.");
       if (modoVigilante == DESARMADO) {
         tentarArmar();
       } else {
@@ -940,6 +1063,7 @@ void executarModoTeste() {
     " (" + String(estadoLuzFiltrado ? "ACESA" : "APAGADA") + ")");
   logSerial("TESTE", "SENSOR", "Porta: " + String(estadoPortaFiltrado ? "ABERTA" : "fechada"));
   logSerial("TESTE", "SENSOR", "Distancia: " + String(lerDistanciaFiltrada(), 1) + " cm");
+  logSerial("TESTE", "SENSOR", "Free heap: " + String(ESP.getFreeHeap()) + " bytes");
 
   logSerial("INFO", "TESTE", "Modo teste concluido.");
   tone(Pins::BUZZER_E, 1500, 100); delay(120);
@@ -1141,10 +1265,7 @@ void exibirTelaDesarmado() {
 
   display.setCursor(0, 26);
   display.print("Rearme em: ");
-  display.print(min);
-  display.print("m");
-  display.print(seg);
-  display.print("s");
+  display.print(min); display.print("m"); display.print(seg); display.print("s");
 
   display.setCursor(0, 36);
   display.print("UID: ");
@@ -1239,8 +1360,30 @@ String nomeModo(ModoVigilante modo) {
 // COMANDOS SERIAL
 // ==========================================
 void processarComandoSerial(String cmd) {
+  String cmdOriginal = cmd;
   cmd.trim();
   cmd.toUpperCase();
+
+  // Caso especial: SET URL precisa do valor original (case-sensitive)
+  if (cmd.startsWith("SET URL ")) {
+    String nova = cmdOriginal.substring(8);   // preserva case e https://
+    nova.trim();
+
+    if (nova.length() < 10 || !nova.startsWith("http")) {
+      logSerial("WARN", "CMD", "URL invalida. Deve comecar com http:// ou https://");
+      return;
+    }
+
+    servidorUrl = nova;
+    salvarUrlNaNVS(servidorUrl);
+    prepararClienteSeguro();
+    tempoUltimaFalhaCritica = 0;
+    falhasConsecutivasStatus = 0;
+
+    logSerial("INFO", "CMD", "Nova URL: " + servidorUrl);
+    logSerial("INFO", "CMD", "Cliente TLS reiniciado. Proximo envio usara a nova URL.");
+    return;
+  }
 
   logSerial("INFO", "CMD", "Comando recebido: " + cmd);
 
@@ -1266,6 +1409,14 @@ void processarComandoSerial(String cmd) {
       logSerial("WARN", "CMD", "Timeout fora da faixa (0-1440 min).");
     }
   }
+  else if (cmd == "GET URL") {
+    logSerial("INFO", "NVS", "URL atual: " + servidorUrl);
+  }
+  else if (cmd == "URL RESET") {
+    resetarUrlNVS();
+    prepararClienteSeguro();
+    logSerial("INFO", "NVS", "URL resetada. Proximo envio usara: " + servidorUrl);
+  }
   else if (cmd == "STATUS") {
     Serial.println(F("----------- STATUS ATUAL -----------"));
     Serial.print(F("  Modo Vigilante:       ")); Serial.println(nomeModo(modoVigilante));
@@ -1279,9 +1430,13 @@ void processarComandoSerial(String cmd) {
     } else {
       Serial.println(F("OFF"));
     }
+    Serial.print(F("  Servidor URL:         ")); Serial.println(servidorUrl);
     Serial.print(F("  Servidor remoto:      ")); Serial.println(servidorOnline ? "ONLINE" : "OFFLINE");
     Serial.print(F("  Envios OK/Falha:      "));
     Serial.print(contadorEnviosOk); Serial.print("/"); Serial.println(contadorEnviosFalha);
+    Serial.print(F("  Cliente TLS:          ")); Serial.println(clienteSeguroPronto ? "pronto" : "nao pronto");
+    Serial.print(F("  Falhas seguidas:      ")); Serial.println(falhasConsecutivasStatus);
+    Serial.print(F("  Free heap:            ")); Serial.print(ESP.getFreeHeap()); Serial.println(F(" bytes"));
     Serial.print(F("  Comandos recebidos:   ")); Serial.println(contadorCmdsRecebidos);
     Serial.print(F("  Timeout Desarme:      ")); Serial.print(timeoutDesarme / 60000UL); Serial.println(F(" min"));
     if (modoVigilante == DESARMADO) {
@@ -1332,11 +1487,23 @@ void processarComandoSerial(String cmd) {
     testarHTTPS();
   }
   else if (cmd == "TESTE_SRV") {
-    logSerial("INFO", "TUNEL", "Testando " + String(SERVIDOR_URL) + "/api/health");
+    logSerial("INFO", "TUNEL", "Testando " + servidorUrl + "/api/health");
+
+    if (!clienteSeguroPronto) prepararClienteSeguro();
+
     HTTPClient http;
-    http.begin(String(SERVIDOR_URL) + "/api/health");
-    http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.2");
-    http.setTimeout(12000);
+    http.setReuse(true);
+    http.setConnectTimeout(12000);
+    http.setTimeout(HTTP_READ_TIMEOUT_MS);
+
+    if (!http.begin(clienteSeguro, servidorUrl + "/api/health")) {
+      logSerial("WARN", "TUNEL", "http.begin falhou.");
+      prepararClienteSeguro();
+      return;
+    }
+    http.addHeader("User-Agent", "ESP32-Rack-Monitor/7.5");
+    http.addHeader("Connection", "keep-alive");
+
     int code = http.GET();
     if (code == 200) {
       logSerial("INFO", "TUNEL", "OK! " + http.getString());
@@ -1345,6 +1512,13 @@ void processarComandoSerial(String cmd) {
         " | " + http.errorToString(code));
     }
     http.end();
+  }
+  else if (cmd == "RECONECTAR") {
+    logSerial("INFO", "SRV", "Forcando reconexao TLS...");
+    prepararClienteSeguro();
+    tempoUltimaFalhaCritica = 0;
+    falhasConsecutivasStatus = 0;
+    logSerial("INFO", "SRV", "Reconexao forcada.");
   }
   else if (cmd == "DIAG") {
     logSerial("INFO", "CMD", "Executando diagnostico de rede...");
@@ -1383,6 +1557,9 @@ void processarComandoSerial(String cmd) {
   }
   else if (cmd == "HELP") {
     Serial.println(F("----------- COMANDOS DISPONIVEIS -----------"));
+    Serial.println(F("  SET URL <https://...>   - Troca URL do servidor (salva em NVS)"));
+    Serial.println(F("  GET URL                 - Mostra URL atual"));
+    Serial.println(F("  URL RESET               - Volta a URL padrao"));
     Serial.println(F("  SET LIMIAR <5-400>      - Ajusta limiar ultrassonico"));
     Serial.println(F("  SET TIMEOUT <0-1440>    - Timeout de desarme (min)"));
     Serial.println(F("  STATUS                  - Status completo"));
@@ -1391,6 +1568,7 @@ void processarComandoSerial(String cmd) {
     Serial.println(F("  TESTE                   - Modo teste"));
     Serial.println(F("  TESTE_HTTPS             - Testa HTTPS para 3 sites"));
     Serial.println(F("  TESTE_SRV               - Testa conexao com servidor remoto"));
+    Serial.println(F("  RECONECTAR              - Forca nova conexao TLS (reset keep-alive)"));
     Serial.println(F("  DIAG                    - Diagnostico de rede detalhado"));
     Serial.println(F("  RTC                     - Mostra hora do RTC"));
     Serial.println(F("  RTC YYYY-MM-DD HH:MM:SS - Ajusta RTC"));

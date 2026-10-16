@@ -1,175 +1,115 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Dashboard de monitoramento do rack — vigilante, RFID, sensores e alarmes.">
   <title>Rack Monitor</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-      background: #0f172a; color: #e2e8f0; padding: 20px; min-height: 100vh;
-    }
-    .container { max-width: 1000px; margin: 0 auto; }
-    h1 {
-      font-size: 1.8rem; margin-bottom: 20px; color: #60a5fa;
-      display: flex; align-items: center; gap: 10px;
-    }
-    h1::before { content: "RACK"; font-size: 1rem; background: #1e40af;
-      color: white; padding: 4px 10px; border-radius: 6px; font-weight: 700; }
-    .status-dot {
-      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-      margin-right: 6px; animation: pulse 2s infinite;
-    }
-    .online  { background: #4ade80; }
-    .offline { background: #f87171; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 15px; margin-bottom: 20px;
-    }
-    .card {
-      background: #1e293b; padding: 18px; border-radius: 12px;
-      border: 1px solid #334155; transition: border-color .2s;
-    }
-    .card:hover { border-color: #60a5fa; }
-    .card .label {
-      font-size: .75rem; color: #94a3b8; text-transform: uppercase;
-      letter-spacing: .5px; margin-bottom: 6px;
-    }
-    .card .value { font-size: 1.3rem; font-weight: 600; color: #f1f5f9; }
-    .verde    { color: #4ade80 !important; }
-    .vermelho { color: #f87171 !important; }
-    .amarelo  { color: #fbbf24 !important; }
-    .laranja  { color: #fb923c !important; }
-    .azul     { color: #60a5fa !important; }
-    .botoes { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
-    button {
-      background: #2563eb; color: white; border: none; padding: 12px 22px;
-      border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 500;
-      transition: background .15s;
-    }
-    button:hover { background: #1d4ed8; }
-    button:active { transform: scale(.97); }
-    button.perigo { background: #dc2626; }
-    button.perigo:hover { background: #b91c1c; }
-    button.secundario { background: #475569; }
-    button.secundario:hover { background: #334155; }
-    .section-title {
-      font-size: 1.1rem; margin: 20px 0 10px; color: #94a3b8;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .log-box {
-      background: #020617; border: 1px solid #334155; border-radius: 12px;
-      padding: 15px; max-height: 350px; overflow-y: auto;
-      font-family: "Consolas", "Monaco", monospace; font-size: .85rem;
-      line-height: 1.6; white-space: pre-wrap; word-break: break-all;
-    }
-    .log-line { display: block; padding: 2px 0; }
-    .footer { text-align: center; color: #64748b; font-size: .8rem; margin-top: 30px; }
-  </style>
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
 </head>
+
 <body>
   <div class="container">
-    <h1>Rack Monitor
-      <span style="font-size:.9rem; color:#94a3b8; margin-left:auto;">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">Conectando...</span>
-      </span>
-    </h1>
 
-    <div class="grid">
-      <div class="card"><div class="label">Modo Vigilante</div><div class="value" id="modo">--</div></div>
-      <div class="card"><div class="label">Estado Alarme</div><div class="value" id="estado">--</div></div>
-      <div class="card"><div class="label">Porta</div><div class="value" id="porta">--</div></div>
-      <div class="card"><div class="label">Ultimo UID</div><div class="value" id="uid">--</div></div>
-      <div class="card"><div class="label">Acessos RFID</div><div class="value" id="acessos">--</div></div>
-      <div class="card"><div class="label">Rearmes Bloqueados</div><div class="value" id="bloqueios">--</div></div>
-    </div>
+    <!-- ═══════════ HEADER ═══════════ -->
+    <header class="header">
+      <h1 class="header__title">
+        <span class="header__badge">RACK</span>
+        Rack Monitor
+      </h1>
 
-    <div class="botoes">
-      <button onclick="comando('ARMAR')">Armar</button>
-      <button class="perigo" onclick="comando('DESARMAR')">Desarmar</button>
-      <button class="secundario" onclick="comando('TESTE')">Modo Teste</button>
-      <button class="secundario" onclick="comando('RESET')">Reset</button>
-    </div>
+      <div class="header__connection" id="connection" role="status" aria-live="polite">
+        <span class="dot dot--offline" id="connectionDot"></span>
+        <span id="connectionText">Conectando…</span>
+      </div>
+    </header>
 
-    <h2 class="section-title">Ultimos eventos</h2>
-    <div class="log-box" id="log">Carregando...</div>
+    <!-- ═══════════ CARDS DE STATUS ═══════════ -->
+    <main>
+      <section class="cards" aria-label="Status atual">
+        <article class="card" data-tone="modo">
+          <h2 class="card__label">Modo Vigilante</h2>
+          <p class="card__value" id="cardModo">--</p>
+        </article>
 
-    <div class="footer">Rack Monitor v1.0 - Servidor Docker - Atualiza a cada 2s</div>
+        <article class="card" data-tone="estado">
+          <h2 class="card__label">Estado Alarme</h2>
+          <p class="card__value" id="cardEstado">--</p>
+        </article>
+
+        <article class="card" data-tone="porta">
+          <h2 class="card__label">Porta</h2>
+          <p class="card__value" id="cardPorta">--</p>
+        </article>
+
+        <article class="card">
+          <h2 class="card__label">IP do ESP32</h2>
+          <p class="card__value card__value--sm" id="cardIP">--</p>
+        </article>
+
+        <article class="card">
+          <h2 class="card__label">Último UID</h2>
+          <p class="card__value card__value--mono" id="cardUID">--</p>
+        </article>
+
+        <article class="card">
+          <h2 class="card__label">Acessos RFID</h2>
+          <p class="card__value" id="cardAcessos">0</p>
+        </article>
+
+        <article class="card">
+          <h2 class="card__label">Invasões</h2>
+          <p class="card__value" id="cardInvasoes">0</p>
+        </article>
+
+        <article class="card">
+          <h2 class="card__label">Rearmes Bloqueados</h2>
+          <p class="card__value" id="cardBloqueios">0</p>
+        </article>
+      </section>
+
+      <!-- ═══════════ CONTROLES ═══════════ -->
+      <section class="controls" aria-label="Comandos">
+        <button type="button" class="btn btn--primary" data-command="ARMAR">
+          <span aria-hidden="true">🔒</span> Armar
+        </button>
+        <button type="button" class="btn btn--danger" data-command="DESARMAR" data-confirm="Desarmar o sistema?">
+          <span aria-hidden="true">🔓</span> Desarmar
+        </button>
+        <button type="button" class="btn btn--neutral" data-command="TESTE">
+          <span aria-hidden="true">🧪</span> Modo Teste
+        </button>
+        <button type="button" class="btn btn--neutral" data-command="RESET" data-confirm="Zerar contadores?">
+          <span aria-hidden="true">🔄</span> Reset
+        </button>
+      </section>
+
+      <!-- ═══════════ EVENTOS SEMÂNTICOS ═══════════ -->
+      <section class="panel">
+        <h2 class="panel__title">Últimos eventos</h2>
+        <div class="log log--events" id="logEventos" aria-live="polite">
+          <p class="log__empty">Aguardando eventos…</p>
+        </div>
+      </section>
+
+      <!-- ═══════════ HISTÓRICO DE STATUS ═══════════ -->
+      <section class="panel">
+        <h2 class="panel__title">Histórico de status</h2>
+        <div class="log log--history" id="logHistorico" aria-live="polite">
+          <p class="log__empty">Aguardando dados do ESP32…</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      Rack Monitor v2.0 · Docker · <span id="footerTime">--</span>
+    </footer>
   </div>
-
-  <script>
-    async function atualizar() {
-      try {
-        const r = await fetch('/api/status');
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const d = await r.json();
-
-        document.getElementById('statusDot').className = 'status-dot online';
-        document.getElementById('statusText').textContent = 'Online';
-
-        const modoEl = document.getElementById('modo');
-        modoEl.textContent = d.modo;
-        modoEl.className = 'value ' + (d.armado ? 'verde' : 'azul');
-
-        const estadoEl = document.getElementById('estado');
-        estadoEl.textContent = d.estado;
-        estadoEl.className = 'value ' + corDoEstado(d.estado);
-
-        const portaEl = document.getElementById('porta');
-        portaEl.textContent = d.porta;
-        portaEl.className = 'value ' + (d.porta === 'ABERTA' ? 'vermelho' : 'verde');
-
-        document.getElementById('uid').textContent = d.uid || '-';
-        document.getElementById('acessos').textContent = d.acessos || 0;
-        document.getElementById('bloqueios').textContent = d.bloqueios || 0;
-
-        const linhas = (d.historico || []).map(h =>
-          '[' + h.ts + '] ' + h.modo + ' | ' + h.estado + ' | Porta: ' + h.porta + ' | UID: ' + h.uid
-        );
-        document.getElementById('log').innerHTML = linhas.length
-          ? linhas.map(l => '<span class="log-line">' + escapeHtml(l) + '</span>').join('')
-          : '<span class="log-line">Sem eventos ainda... aguardando ESP32.</span>';
-
-      } catch (e) {
-        document.getElementById('statusDot').className = 'status-dot offline';
-        document.getElementById('statusText').textContent = 'Offline';
-      }
-    }
-
-    function corDoEstado(estado) {
-      if (estado === 'SEGURO') return 'verde';
-      if (estado === 'AVISO_SALA') return 'amarelo';
-      if (estado === 'APROXIMACAO_RACK') return 'laranja';
-      return 'vermelho';
-    }
-
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, c => ({
-        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-      }[c]));
-    }
-
-    async function comando(cmd) {
-      if (cmd === 'RESET' && !confirm('Zerar contadores?')) return;
-      if (cmd === 'DESARMAR' && !confirm('Desarmar o sistema?')) return;
-      try {
-        const r = await fetch('/api/comando', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comando: cmd })
-        });
-        console.log(cmd, '->', await r.text());
-        atualizar();
-      } catch (e) {
-        alert('Erro: ' + e.message);
-      }
-    }
-
-    atualizar();
-    setInterval(atualizar, 2000);
-  </script>
 </body>
+
 </html>
