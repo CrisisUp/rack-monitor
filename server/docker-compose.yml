@@ -1,0 +1,20 @@
+services:
+  rack-server:
+    build: .
+    container_name: rack-monitor-server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/usr/src/app
+      - /usr/src/app/node_modules
+      - ./data:/usr/src/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: unless-stopped
+    networks:
+      - rack-network
+
+networks:
+  rack-network:
+    driver: bridge

@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.vscode
+.idea
+*.md
+data/*.json
+data/*.csv
