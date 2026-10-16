@@ -7,7 +7,7 @@ const path = require("path");
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, "data");
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, () => {
   console.log("=================================================");
   console.log("  RACK MONITOR SERVER");
   console.log("=================================================");
